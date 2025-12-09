@@ -4,6 +4,7 @@ package dev.imprex.orebfuscator;
  * DummyException is a singleton exception used in tests to ensure a consistent stack trace. The stack trace is fixed
  * and shouldn't be changed, even if the class is modified.
  */
+@SuppressWarnings("serial")
 public class DummyException extends Exception {
 
   /**
