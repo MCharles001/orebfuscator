@@ -15,7 +15,9 @@ import dev.imprex.orebfuscator.config.context.ConfigMessage;
 import dev.imprex.orebfuscator.config.context.ConfigParsingContext;
 import dev.imprex.orebfuscator.config.yaml.ConfigurationSection;
 import dev.imprex.orebfuscator.util.BlockProperties;
+import org.jspecify.annotations.NullMarked;
 
+@NullMarked
 public class OrebfuscatorProximityConfig extends AbstractWorldConfig implements ProximityConfig {
 
   private int distance = 24;
@@ -159,11 +161,9 @@ public class OrebfuscatorProximityConfig extends AbstractWorldConfig implements 
     }
   }
 
-  public JsonObject toJson() {
-    JsonObject object = new JsonObject();
-    object.add("hiddenBlocks", ConfigBlockValue.toJson(hiddenBlocks.keySet()));
-    object.add("randomBlocks", randomBlocksToJson());
-    return object;
+  public void dumpBlocks(ConfigurationSection section) {
+    ConfigBlockValue.dump(section.createSection("hiddenBlocks"), hiddenBlocks.keySet());
+    super.dumpBlocks(section);
   }
 
   @Override

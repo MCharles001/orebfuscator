@@ -1,16 +1,17 @@
 package net.imprex.orebfuscator.util;
 
-import java.util.Iterator;
-import java.util.List;
-import java.util.function.Predicate;
-
 import com.comphenix.protocol.events.PacketContainer;
 import com.comphenix.protocol.reflect.accessors.Accessors;
 import com.comphenix.protocol.reflect.accessors.FieldAccessor;
 import com.comphenix.protocol.utility.MinecraftReflection;
-
 import dev.imprex.orebfuscator.util.BlockPos;
+import java.util.Iterator;
+import java.util.List;
+import java.util.function.Predicate;
+import org.jspecify.annotations.NullMarked;
 
+// TODO: replace all ProtocolLib reflections with own reflect lib
+@NullMarked
 public class WrappedClientboundLevelChunkPacketData {
 
   private static final Class<?> CLIENTBOUND_LEVEL_CHUNK_PACKET_DATA = MinecraftReflection.getMinecraftClass(

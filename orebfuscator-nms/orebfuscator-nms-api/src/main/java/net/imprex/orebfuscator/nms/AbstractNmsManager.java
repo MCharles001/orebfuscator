@@ -1,23 +1,24 @@
 package net.imprex.orebfuscator.nms;
 
-import java.util.HashMap;
-import java.util.Map;
-import org.bukkit.World;
-import org.bukkit.entity.Player;
-import org.jetbrains.annotations.NotNull;
-import org.jetbrains.annotations.Nullable;
 import dev.imprex.orebfuscator.reflect.Reflector;
 import dev.imprex.orebfuscator.reflect.accessor.MethodAccessor;
 import dev.imprex.orebfuscator.util.BlockProperties;
 import dev.imprex.orebfuscator.util.BlockStateProperties;
 import dev.imprex.orebfuscator.util.BlockTag;
-import dev.imprex.orebfuscator.util.MathUtil;
 import dev.imprex.orebfuscator.util.NamespacedKey;
+import dev.imprex.orebfuscator.util.QuickMaths;
+import java.util.HashMap;
+import java.util.Map;
+import org.bukkit.World;
+import org.bukkit.entity.Player;
+import org.jspecify.annotations.NullMarked;
+import org.jspecify.annotations.Nullable;
 
+@NullMarked
 public abstract class AbstractNmsManager implements NmsManager {
 
-  private static MethodAccessor worldGetHandle;
-  private static MethodAccessor playerGetHandle;
+  private static @Nullable MethodAccessor worldGetHandle;
+  private static @Nullable MethodAccessor playerGetHandle;
 
   protected static <T> T worldHandle(World world, Class<T> targetClass) {
     if (worldGetHandle == null) {
@@ -52,7 +53,7 @@ public abstract class AbstractNmsManager implements NmsManager {
 
   public AbstractNmsManager(int uniqueBlockStateCount) {
     this.uniqueBlockStateCount = uniqueBlockStateCount;
-    this.maxBitsPerBlockState = MathUtil.ceilLog2(uniqueBlockStateCount);
+    this.maxBitsPerBlockState = QuickMaths.ceilLog2(uniqueBlockStateCount);
 
     this.blockStates = new BlockStateProperties[uniqueBlockStateCount];
   }
@@ -80,18 +81,23 @@ public abstract class AbstractNmsManager implements NmsManager {
   }
 
   @Override
-  public final @Nullable BlockProperties getBlockByName(@NotNull String name) {
-    return this.blocks.get(NamespacedKey.fromString(name));
+  public final @Nullable BlockProperties getBlockByName(String name) {
+    return NamespacedKey.tryParse(name).map(this.blocks::get).orElse(null);
   }
 
   @Override
-  public final @Nullable BlockTag getBlockTagByName(@NotNull String name) {
-    return this.tags.get(NamespacedKey.fromString(name));
+  public final @Nullable BlockTag getBlockTagByName(String name) {
+    return NamespacedKey.tryParse(name).map(this.tags::get).orElse(null);
   }
 
   @Override
   public final boolean isAir(int id) {
     return this.blockStates[id].isAir();
+  }
+
+  @Override
+  public final boolean isLava(int id) {
+    return this.blockStates[id].isLava();
   }
 
   @Override

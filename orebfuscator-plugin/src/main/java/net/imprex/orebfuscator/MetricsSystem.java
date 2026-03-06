@@ -1,18 +1,18 @@
 package net.imprex.orebfuscator;
 
+import dev.imprex.orebfuscator.config.OrebfuscatorConfig;
+import dev.imprex.orebfuscator.util.QuickMaths;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.NavigableMap;
 import java.util.TreeMap;
-
 import org.bstats.bukkit.Metrics;
 import org.bstats.charts.DrilldownPie;
 import org.bstats.charts.SimplePie;
 import org.bukkit.Bukkit;
+import org.jspecify.annotations.NullMarked;
 
-import dev.imprex.orebfuscator.config.OrebfuscatorConfig;
-import dev.imprex.orebfuscator.util.MathUtil;
-
+@NullMarked
 public class MetricsSystem {
 
   private static final NavigableMap<Integer, String> PLAYER_COUNT_GROUPS = new TreeMap<>();
@@ -32,8 +32,8 @@ public class MetricsSystem {
     this.metrics = new Metrics(orebfuscator, 8942);
     this.addMemoryChart();
     this.addPlayerCountChart();
-    this.addConfigCharts(orebfuscator.getOrebfuscatorConfig());
-    this.addUsageCharts(orebfuscator.getOrebfuscatorConfig());
+    this.addConfigCharts(orebfuscator.config());
+    this.addUsageCharts(orebfuscator.config());
   }
 
   public void addMemoryChart() {
@@ -47,7 +47,7 @@ public class MetricsSystem {
       } else {
         float gibiByte = Math.round(memory / 1073741824f * 100f) / 100f;
         exact.put(gibiByte + "GiB", 1);
-        result.put(MathUtil.ceilToPowerOfTwo((int) gibiByte) + "GiB", exact);
+        result.put(QuickMaths.ceilToPowerOfTwo((int) gibiByte) + "GiB", exact);
       }
 
       return result;
@@ -62,8 +62,8 @@ public class MetricsSystem {
   }
 
   public void addConfigCharts(OrebfuscatorConfig config) {
-    this.metrics.addCustomChart(new SimplePie("max_mspt", () -> {
-      return Integer.toString(config.advanced().maxMillisecondsPerTick());
+    this.metrics.addCustomChart(new SimplePie("obfuscation_timeout", () -> {
+      return Long.toString(config.advanced().obfuscationTimeout());
     }));
     this.metrics.addCustomChart(new SimplePie("update_radius", () -> {
       return Integer.toString(config.general().updateRadius());
@@ -78,7 +78,10 @@ public class MetricsSystem {
       return Boolean.toString(config.general().ignoreSpectator());
     }));
     this.metrics.addCustomChart(new SimplePie("cache", () -> {
-      return Boolean.toString(config.cache().enabled());
+      if (config.cache().enabled()) {
+        return config.cache().enableDiskCache() ? "disk" : "true";
+      }
+      return "false";
     }));
     this.metrics.addCustomChart(new SimplePie("proximity", () -> {
       return Boolean.toString(config.proximityEnabled());
@@ -89,8 +92,6 @@ public class MetricsSystem {
     this.metrics.addCustomChart(new SimplePie("frustum_culling", () -> {
       return Boolean.toString(config.usesFrustumCulling());
     }));
-    this.metrics.addCustomChart(new SimplePie("ray_cast", () -> {
-      return config.usesRayCastCheck();
-    }));
+    this.metrics.addCustomChart(new SimplePie("ray_cast", config::usesRayCastCheck));
   }
 }

@@ -1,20 +1,21 @@
 package net.imprex.orebfuscator.nms.v1_20_R3;
 
+import dev.imprex.orebfuscator.cache.AbstractRegionFileCache;
+import dev.imprex.orebfuscator.config.api.CacheConfig;
+import dev.imprex.orebfuscator.util.ChunkCacheKey;
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
 import java.nio.file.Path;
-
-import org.bukkit.Bukkit;
-
-import dev.imprex.orebfuscator.cache.AbstractRegionFileCache;
-import dev.imprex.orebfuscator.config.api.CacheConfig;
-import dev.imprex.orebfuscator.util.ChunkCacheKey;
 import net.minecraft.server.dedicated.DedicatedServer;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.chunk.storage.RegionFile;
 import net.minecraft.world.level.chunk.storage.RegionFileVersion;
+import org.bukkit.Bukkit;
+import org.jspecify.annotations.NullMarked;
+import org.jspecify.annotations.Nullable;
 
+@NullMarked
 public class RegionFileCache extends AbstractRegionFileCache<RegionFile> {
 
   RegionFileCache(CacheConfig cacheConfig) {
@@ -33,7 +34,7 @@ public class RegionFileCache extends AbstractRegionFileCache<RegionFile> {
   }
 
   @Override
-  protected DataInputStream createInputStream(RegionFile t, ChunkCacheKey key) throws IOException {
+  protected @Nullable DataInputStream createInputStream(RegionFile t, ChunkCacheKey key) throws IOException {
     return t.getChunkDataInputStream(new ChunkPos(key.x(), key.z()));
   }
 

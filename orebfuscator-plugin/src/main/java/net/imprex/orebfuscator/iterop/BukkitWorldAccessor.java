@@ -1,42 +1,34 @@
 package net.imprex.orebfuscator.iterop;
 
-import java.util.Collection;
-import java.util.Map;
-import java.util.Objects;
-import java.util.concurrent.ConcurrentHashMap;
-
-import org.bukkit.Bukkit;
-import org.bukkit.World;
-import org.bukkit.event.EventHandler;
-import org.bukkit.event.Listener;
-import org.bukkit.event.world.WorldLoadEvent;
-import org.bukkit.event.world.WorldUnloadEvent;
-import org.bukkit.plugin.Plugin;
-
 import com.comphenix.protocol.reflect.accessors.Accessors;
 import com.comphenix.protocol.reflect.accessors.MethodAccessor;
-
+import dev.imprex.orebfuscator.config.api.WorldConfigBundle;
+import dev.imprex.orebfuscator.interop.ChunkAccessor;
+import dev.imprex.orebfuscator.interop.ChunkPacketAccessor;
 import dev.imprex.orebfuscator.interop.WorldAccessor;
 import dev.imprex.orebfuscator.logging.OfcLogger;
+import dev.imprex.orebfuscator.obfuscation.ObfuscationRequest;
+import dev.imprex.orebfuscator.util.BlockPos;
+import dev.imprex.orebfuscator.util.ChunkDirection;
+import java.util.Arrays;
+import java.util.Objects;
+import java.util.concurrent.CompletableFuture;
+import net.imprex.orebfuscator.Orebfuscator;
+import net.imprex.orebfuscator.OrebfuscatorNms;
 import net.imprex.orebfuscator.util.MinecraftVersion;
+import org.bukkit.World;
+import org.jspecify.annotations.NullMarked;
+import org.jspecify.annotations.Nullable;
 
+@NullMarked
 public class BukkitWorldAccessor implements WorldAccessor {
 
   private static final boolean HAS_DYNAMIC_HEIGHT = MinecraftVersion.isAtOrAbove("1.17");
 
-  private static final Map<World, BukkitWorldAccessor> ACCESSOR_LOOKUP = new ConcurrentHashMap<>();
+  private static final @Nullable MethodAccessor WORLD_GET_MAX_HEIGHT = getWorldMethod("getMaxHeight");
+  private static final @Nullable MethodAccessor WORLD_GET_MIN_HEIGHT = getWorldMethod("getMinHeight");
 
-  public static BukkitWorldAccessor get(World world) {
-    return ACCESSOR_LOOKUP.computeIfAbsent(world, key -> {
-      OfcLogger.warn("Created world accessor outside of event!");
-      return new BukkitWorldAccessor(key);
-    });
-  }
-
-  private static final MethodAccessor WORLD_GET_MAX_HEIGHT = getWorldMethod("getMaxHeight");
-  private static final MethodAccessor WORLD_GET_MIN_HEIGHT = getWorldMethod("getMinHeight");
-
-  private static MethodAccessor getWorldMethod(String methodName) {
+  private static @Nullable MethodAccessor getWorldMethod(String methodName) {
     if (HAS_DYNAMIC_HEIGHT) {
       MethodAccessor methodAccessor = getWorldMethod0(World.class, methodName);
       if (methodAccessor == null) {
@@ -48,7 +40,7 @@ public class BukkitWorldAccessor implements WorldAccessor {
     return null;
   }
 
-  private static MethodAccessor getWorldMethod0(Class<?> target, String methodName) {
+  private static @Nullable MethodAccessor getWorldMethod0(Class<?> target, String methodName) {
     try {
       return Accessors.getMethodAccessor(target, methodName);
     } catch (IllegalArgumentException e) {
@@ -66,38 +58,19 @@ public class BukkitWorldAccessor implements WorldAccessor {
     return block >> 4;
   }
 
-  public static Collection<BukkitWorldAccessor> getWorlds() {
-    return ACCESSOR_LOOKUP.values();
-  }
-
-  public static void registerListener(Plugin plugin) {
-    for (World world : Bukkit.getWorlds()) {
-      ACCESSOR_LOOKUP.put(world, new BukkitWorldAccessor(world));
-    }
-
-    Bukkit.getPluginManager().registerEvents(new Listener() {
-      @EventHandler
-      public void onWorldUnload(WorldLoadEvent event) {
-        World world = event.getWorld();
-        ACCESSOR_LOOKUP.put(world, new BukkitWorldAccessor(world));
-      }
-
-      @EventHandler
-      public void onWorldUnload(WorldUnloadEvent event) {
-        ACCESSOR_LOOKUP.remove(event.getWorld());
-      }
-    }, plugin);
-  }
-
   public final World world;
+  private final Orebfuscator orebfuscator;
 
   private final int maxHeight;
   private final int minHeight;
 
-  private BukkitWorldAccessor(World world) {
-    this.world = Objects.requireNonNull(world);
+  private @Nullable WorldConfigBundle worldConfigBundle;
 
-    if (HAS_DYNAMIC_HEIGHT) {
+  BukkitWorldAccessor(World world, Orebfuscator orebfuscator) {
+    this.world = Objects.requireNonNull(world);
+    this.orebfuscator = Objects.requireNonNull(orebfuscator);
+
+    if (WORLD_GET_MAX_HEIGHT != null && WORLD_GET_MIN_HEIGHT != null) {
       this.maxHeight = (int) WORLD_GET_MAX_HEIGHT.invoke(world);
       this.minHeight = (int) WORLD_GET_MIN_HEIGHT.invoke(world);
     } else {
@@ -107,43 +80,104 @@ public class BukkitWorldAccessor implements WorldAccessor {
   }
 
   @Override
-  public String getName() {
+  public WorldConfigBundle config() {
+    if (this.worldConfigBundle == null) {
+      this.worldConfigBundle = this.orebfuscator.config().world(this);
+    }
+    return this.worldConfigBundle;
+  }
+
+  @Override
+  public String name() {
     return this.world.getName();
   }
 
   @Override
-  public int getHeight() {
+  public int height() {
     return this.maxHeight - this.minHeight;
   }
 
   @Override
-  public int getMinBuildHeight() {
+  public int minBuildHeight() {
     return this.minHeight;
   }
 
   @Override
-  public int getMaxBuildHeight() {
+  public int maxBuildHeight() {
     return this.maxHeight;
   }
 
   @Override
-  public int getSectionCount() {
-    return this.getMaxSection() - this.getMinSection();
+  public int sectionCount() {
+    return this.maxSection() - this.minSection();
   }
 
   @Override
-  public int getMinSection() {
-    return blockToSectionCoord(this.getMinBuildHeight());
+  public int minSection() {
+    return blockToSectionCoord(this.minBuildHeight());
   }
 
   @Override
-  public int getMaxSection() {
-    return blockToSectionCoord(this.getMaxBuildHeight() - 1) + 1;
+  public int maxSection() {
+    return blockToSectionCoord(this.maxBuildHeight() - 1) + 1;
   }
 
   @Override
-  public int getSectionIndex(int y) {
-    return blockToSectionCoord(y) - getMinSection();
+  public int sectionIndex(int y) {
+    return blockToSectionCoord(y) - minSection();
+  }
+
+  public ChunkAccessor[] getNeighboringChunksNow(int chunkX, int chunkZ) {
+    final ChunkAccessor[] chunks = new ChunkAccessor[4];
+
+    for (ChunkDirection direction : ChunkDirection.values()) {
+      int x = chunkX + direction.getOffsetX();
+      int z = chunkZ + direction.getOffsetZ();
+      chunks[direction.ordinal()] = getChunkNow(x, z);
+    }
+
+    return chunks;
+  }
+
+  @Override
+  @SuppressWarnings("unchecked")
+  public CompletableFuture<ChunkAccessor[]> getNeighboringChunks(ObfuscationRequest request) {
+    var neighborChunks = request.neighborChunks();
+    if (neighborChunks != null && Arrays.stream(neighborChunks).noneMatch(ChunkAccessor::isNullOrEmpty)) {
+      return CompletableFuture.completedFuture(neighborChunks);
+    }
+
+    final ChunkPacketAccessor packet = request.packet();
+    final CompletableFuture<ChunkAccessor>[] futures = (CompletableFuture<ChunkAccessor>[]) new CompletableFuture[4];
+
+    for (ChunkDirection direction : ChunkDirection.values()) {
+      int chunkX = packet.chunkX() + direction.getOffsetX();
+      int chunkZ = packet.chunkZ() + direction.getOffsetZ();
+
+      int index = direction.ordinal();
+      var chunk = neighborChunks != null ? neighborChunks[index] : null;
+
+      if (ChunkAccessor.isNullOrEmpty(chunk)) {
+        futures[index] = OrebfuscatorNms.getChunkFuture(world, chunkX, chunkZ)
+            .thenApply(ChunkAccessor::ofNullable);
+      } else {
+        futures[index] = CompletableFuture.completedFuture(chunk);
+      }
+    }
+
+    return CompletableFuture.allOf(futures).thenApply(v ->
+        Arrays.stream(futures).map(CompletableFuture::join).toArray(ChunkAccessor[]::new));
+  }
+
+  @Override
+  public ChunkAccessor getChunkNow(int chunkX, int chunkZ) {
+    ChunkAccessor chunkAccessor = OrebfuscatorNms.getChunkNow(world, chunkX, chunkZ);
+    return ChunkAccessor.ofNullable(chunkAccessor);
+  }
+
+  @Override
+  public void sendBlockUpdates(Iterable<BlockPos> iterable) {
+    OrebfuscatorNms.sendBlockUpdates(world, iterable);
   }
 
   @Override
@@ -161,6 +195,6 @@ public class BukkitWorldAccessor implements WorldAccessor {
 
   @Override
   public String toString() {
-    return String.format("[%s, minY=%s, maxY=%s]", world.getName(), minHeight, maxHeight);
+    return "[name=%s, minY=%s, maxY=%s]".formatted(name(), minHeight, maxHeight);
   }
 }

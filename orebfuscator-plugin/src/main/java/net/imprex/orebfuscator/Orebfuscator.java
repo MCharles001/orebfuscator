@@ -1,8 +1,31 @@
 package net.imprex.orebfuscator;
 
+import dev.imprex.orebfuscator.UpdateSystem;
+import dev.imprex.orebfuscator.cache.AbstractRegionFileCache;
+import dev.imprex.orebfuscator.cache.ObfuscationCache;
+import dev.imprex.orebfuscator.chunk.ChunkFactory;
+import dev.imprex.orebfuscator.config.OrebfuscatorConfig;
+import dev.imprex.orebfuscator.interop.OrebfuscatorCore;
+import dev.imprex.orebfuscator.interop.PlayerAccessor;
+import dev.imprex.orebfuscator.interop.RegistryAccessor;
+import dev.imprex.orebfuscator.interop.WorldAccessor;
+import dev.imprex.orebfuscator.logging.OfcLogger;
+import dev.imprex.orebfuscator.obfuscation.ObfuscationPipeline;
+import dev.imprex.orebfuscator.obfuscation.ObfuscationProcessor;
+import dev.imprex.orebfuscator.proximity.ProximitySystem;
+import dev.imprex.orebfuscator.statistics.OrebfuscatorStatistics;
+import dev.imprex.orebfuscator.statistics.StatisticsRegistry;
+import dev.imprex.orebfuscator.util.Version;
+import dev.imprex.orebfuscator.util.concurrent.OrebfuscatorExecutor;
 import java.nio.file.Path;
 import java.util.List;
-
+import net.imprex.orebfuscator.api.OrebfuscatorService;
+import net.imprex.orebfuscator.iterop.BukkitLoggerAccessor;
+import net.imprex.orebfuscator.iterop.BukkitPlayerAccessorManager;
+import net.imprex.orebfuscator.iterop.BukkitWorldAccessorManager;
+import net.imprex.orebfuscator.obfuscation.ObfuscationSystem;
+import net.imprex.orebfuscator.proximity.ProximityPacketListener;
+import net.imprex.orebfuscator.util.MinecraftVersion;
 import org.bukkit.Bukkit;
 import org.bukkit.event.Event;
 import org.bukkit.event.EventPriority;
@@ -13,92 +36,76 @@ import org.bukkit.plugin.Plugin;
 import org.bukkit.plugin.ServicePriority;
 import org.bukkit.plugin.java.JavaPlugin;
 
-import dev.imprex.orebfuscator.chunk.ChunkFactory;
-import dev.imprex.orebfuscator.config.OrebfuscatorConfig;
-import dev.imprex.orebfuscator.interop.RegistryAccessor;
-import dev.imprex.orebfuscator.interop.ServerAccessor;
-import dev.imprex.orebfuscator.interop.WorldAccessor;
-import dev.imprex.orebfuscator.logging.OfcLogger;
-import dev.imprex.orebfuscator.util.Version;
-import net.imprex.orebfuscator.api.OrebfuscatorService;
-import net.imprex.orebfuscator.cache.ObfuscationCache;
-import net.imprex.orebfuscator.iterop.BukkitLoggerAccessor;
-import net.imprex.orebfuscator.iterop.BukkitWorldAccessor;
-import net.imprex.orebfuscator.obfuscation.ObfuscationSystem;
-import net.imprex.orebfuscator.player.OrebfuscatorPlayerMap;
-import net.imprex.orebfuscator.proximity.ProximityDirectorThread;
-import net.imprex.orebfuscator.proximity.ProximityPacketListener;
-import net.imprex.orebfuscator.util.MinecraftVersion;
-
-public class Orebfuscator extends JavaPlugin implements Listener, ServerAccessor {
+public class Orebfuscator extends JavaPlugin implements Listener, OrebfuscatorCore {
 
   public static final ThreadGroup THREAD_GROUP = new ThreadGroup("orebfuscator");
 
-  private OrebfuscatorStatistics statistics;
+  private StatisticsRegistry statisticsRegistry;
   private OrebfuscatorConfig config;
-  private OrebfuscatorPlayerMap playerMap;
-  private UpdateSystem updateSystem;
-  private ObfuscationCache obfuscationCache;
-  private ObfuscationSystem obfuscationSystem;
-  private ProximityDirectorThread proximityThread;
-  private ProximityPacketListener proximityPacketListener;
+  private OrebfuscatorStatistics statistics;
+  private OrebfuscatorExecutor executor;
+
+  private BukkitWorldAccessorManager worldManager;
+  private BukkitPlayerAccessorManager playerManager;
+
   private ChunkFactory chunkFactory;
+  private ObfuscationProcessor obfuscationProcessor;
+  private ObfuscationCache obfuscationCache;
+  private ObfuscationPipeline obfuscationPipeline;
+  private ObfuscationSystem obfuscationSystem;
+
+  private ProximitySystem proximitySystem;
+  private ProximityPacketListener proximityPacketListener;
+
+  private Version orebfuscatorVersion;
+  private UpdateSystem updateSystem;
 
   @Override
   public void onLoad() {
     OfcLogger.setLogger(new BukkitLoggerAccessor(getLogger()));
+    this.orebfuscatorVersion = Version.parse(getDescription().getVersion());
   }
 
   @Override
   public void onEnable() {
     try {
-      // Check for valid minecraft version
       if (MinecraftVersion.isBelow("1.16")) {
         throw new RuntimeException("Orebfuscator only supports minecraft 1.16 and above");
       }
 
-      // Check if protocolLib is enabled
       Plugin protocolLib = getServer().getPluginManager().getPlugin("ProtocolLib");
       if (protocolLib == null || !protocolLib.isEnabled()) {
         throw new RuntimeException("ProtocolLib can't be found or is disabled! Orebfuscator can't be enabled.");
       }
 
-      BukkitWorldAccessor.registerListener(this);
+      this.statisticsRegistry = new StatisticsRegistry();
+      this.worldManager = new BukkitWorldAccessorManager(this);
 
-      this.statistics = new OrebfuscatorStatistics();
-
-      // Load configurations
       OrebfuscatorNms.initialize();
       this.config = new OrebfuscatorConfig(this);
       OrebfuscatorCompatibility.initialize(this, config);
 
-      this.playerMap = new OrebfuscatorPlayerMap(this);
-
-      // Initialize metrics
+      this.playerManager = new BukkitPlayerAccessorManager(this);
       new MetricsSystem(this);
+      this.updateSystem = new UpdateSystem(this, "bukkit");
 
-      // initialize update system and check for updates
-      this.updateSystem = new UpdateSystem(this);
+      this.statistics = new OrebfuscatorStatistics(this.config, this.statisticsRegistry);
+      this.executor = new OrebfuscatorExecutor(this);
 
-      // Load chunk cache
-      this.obfuscationCache = new ObfuscationCache(this);
-
-      // Load obfuscater
       this.chunkFactory = new ChunkFactory(this);
+      this.obfuscationProcessor = new ObfuscationProcessor(this);
+      this.obfuscationCache = new ObfuscationCache(this);
+      this.obfuscationPipeline = new ObfuscationPipeline(this);
       this.obfuscationSystem = new ObfuscationSystem(this);
 
-      // Load proximity hider
-      this.proximityThread = new ProximityDirectorThread(this);
+      this.proximitySystem = new ProximitySystem(this);
       if (this.config.proximityEnabled()) {
-        this.proximityThread.start();
-
+        this.proximitySystem.start();
         this.proximityPacketListener = new ProximityPacketListener(this);
       }
 
       // Load packet listener
       this.obfuscationSystem.registerChunkListener();
-
-      // Store formatted config
       this.config.store();
 
       // initialize service
@@ -119,6 +126,10 @@ public class Orebfuscator extends JavaPlugin implements Listener, ServerAccessor
 
   @Override
   public void onDisable() {
+    if (this.executor != null) {
+      this.executor.shutdown();
+    }
+
     if (this.obfuscationCache != null) {
       this.obfuscationCache.close();
     }
@@ -127,10 +138,8 @@ public class Orebfuscator extends JavaPlugin implements Listener, ServerAccessor
       this.obfuscationSystem.shutdown();
     }
 
-    if (this.config != null && this.config.proximityEnabled() && this.proximityPacketListener != null
-        && this.proximityThread != null) {
+    if (this.config != null && this.config.proximityEnabled() && this.proximityPacketListener != null) {
       this.proximityPacketListener.unregister();
-      this.proximityThread.close();
     }
 
     OrebfuscatorCompatibility.close();
@@ -147,67 +156,115 @@ public class Orebfuscator extends JavaPlugin implements Listener, ServerAccessor
     }
   }
 
-  public OrebfuscatorStatistics getStatistics() {
-    return statistics;
-  }
-
-  public OrebfuscatorConfig getOrebfuscatorConfig() {
-    return this.config;
-  }
-
-  public OrebfuscatorPlayerMap getPlayerMap() {
-    return playerMap;
-  }
-
-  public UpdateSystem getUpdateSystem() {
+  public UpdateSystem updateSystem() {
     return updateSystem;
-  }
-
-  public ObfuscationCache getObfuscationCache() {
-    return this.obfuscationCache;
   }
 
   public ObfuscationSystem getObfuscationSystem() {
     return obfuscationSystem;
   }
 
-  public ProximityPacketListener getProximityPacketListener() {
-    return this.proximityPacketListener;
+  public BukkitWorldAccessorManager worldManager() {
+    return worldManager;
   }
 
-  public ChunkFactory getChunkFactory() {
+  public BukkitPlayerAccessorManager playerManager() {
+    return playerManager;
+  }
+
+  @Override
+  public OrebfuscatorExecutor executor() {
+    return executor;
+  }
+
+  @Override
+  public StatisticsRegistry statisticsRegistry() {
+    return statisticsRegistry;
+  }
+
+  @Override
+  public OrebfuscatorStatistics statistics() {
+    return statistics;
+  }
+
+  @Override
+  public OrebfuscatorConfig config() {
+    return config;
+  }
+
+  @Override
+  public ChunkFactory chunkFactory() {
     return chunkFactory;
   }
 
   @Override
-  public Path getConfigDirectory() {
+  public ObfuscationCache cache() {
+    return obfuscationCache;
+  }
+
+  @Override
+  public ObfuscationPipeline obfuscationPipeline() {
+    return obfuscationPipeline;
+  }
+
+  @Override
+  public ObfuscationProcessor obfuscationProcessor() {
+    return obfuscationProcessor;
+  }
+
+  @Override
+  public boolean isGameThread() {
+    return OrebfuscatorCompatibility.isGameThread();
+  }
+
+  @Override
+  public Path configDirectory() {
     return getDataFolder().toPath();
   }
 
   @Override
-  public Path getWorldDirectory() {
+  public Path worldDirectory() {
     return Bukkit.getWorldContainer().toPath();
   }
 
   @Override
-  public String getOrebfuscatorVersion() {
-    return getDescription().getVersion();
+  public String name() {
+    return getDescription().getName();
   }
 
   @Override
-  public Version getMinecraftVersion() {
+  public Version orebfuscatorVersion() {
+    return this.orebfuscatorVersion;
+  }
+
+  @Override
+  public Version minecraftVersion() {
     return MinecraftVersion.current();
   }
 
   @Override
-  public RegistryAccessor getRegistry() {
+  public RegistryAccessor registry() {
     return OrebfuscatorNms.registry();
   }
 
   @Override
-  public List<WorldAccessor> getWorlds() {
-    return BukkitWorldAccessor.getWorlds().stream()
-        .map(WorldAccessor.class::cast)
-        .toList();
+  public AbstractRegionFileCache<?> createRegionFileCache() {
+    return OrebfuscatorNms.createRegionFileCache(config);
+  }
+
+  @Override
+  public List<WorldAccessor> worlds() {
+    return this.worldManager.all();
+  }
+
+  @Override
+  public List<PlayerAccessor> players() {
+    return this.playerManager.all();
+  }
+
+  @Override
+  public String toString() {
+    var meta = getDescription();
+    return String.format("%s %s", meta.getName(), meta.getVersion());
   }
 }

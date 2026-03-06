@@ -1,8 +1,8 @@
 package net.imprex.orebfuscator.api;
 
 import java.util.Collection;
-
 import org.bukkit.block.Block;
+import org.jspecify.annotations.NullMarked;
 
 /**
  * <p>
@@ -16,6 +16,7 @@ import org.bukkit.block.Block;
  *
  * @since 5.2.0
  */
+@NullMarked
 public interface OrebfuscatorService {
 
   /**

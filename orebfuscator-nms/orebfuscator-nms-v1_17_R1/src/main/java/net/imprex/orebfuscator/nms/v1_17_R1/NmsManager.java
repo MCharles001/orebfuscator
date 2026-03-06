@@ -1,5 +1,15 @@
 package net.imprex.orebfuscator.nms.v1_17_R1;
 
+import com.comphenix.protocol.PacketType;
+import com.comphenix.protocol.events.PacketContainer;
+import com.google.common.collect.ImmutableList;
+import dev.imprex.orebfuscator.cache.AbstractRegionFileCache;
+import dev.imprex.orebfuscator.config.api.Config;
+import dev.imprex.orebfuscator.interop.ChunkAccessor;
+import dev.imprex.orebfuscator.util.BlockProperties;
+import dev.imprex.orebfuscator.util.BlockStateProperties;
+import dev.imprex.orebfuscator.util.BlockTag;
+import dev.imprex.orebfuscator.util.NamespacedKey;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -7,19 +17,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
-import org.bukkit.World;
-import org.bukkit.entity.Player;
-import com.comphenix.protocol.PacketType;
-import com.comphenix.protocol.events.PacketContainer;
-import com.google.common.collect.ImmutableList;
-import dev.imprex.orebfuscator.cache.AbstractRegionFileCache;
-import dev.imprex.orebfuscator.config.api.Config;
-import dev.imprex.orebfuscator.util.BlockProperties;
-import dev.imprex.orebfuscator.util.BlockStateProperties;
-import dev.imprex.orebfuscator.util.BlockTag;
-import dev.imprex.orebfuscator.util.NamespacedKey;
+import java.util.concurrent.CompletableFuture;
 import net.imprex.orebfuscator.nms.AbstractNmsManager;
-import net.imprex.orebfuscator.nms.ReadOnlyChunk;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Registry;
 import net.minecraft.core.SectionPos;
@@ -38,15 +37,22 @@ import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.chunk.ChunkAccess;
+import net.minecraft.world.level.chunk.ChunkStatus;
 import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.chunk.LevelChunkSection;
+import org.bukkit.World;
+import org.bukkit.entity.Player;
+import org.jspecify.annotations.NullMarked;
+import org.jspecify.annotations.Nullable;
 
+@NullMarked
 public class NmsManager extends AbstractNmsManager {
 
   private static final int BLOCK_ID_AIR = Block.getId(Blocks.AIR.defaultBlockState());
 
-  static int getBlockState(LevelChunk chunk, int x, int y, int z) {
-    LevelChunkSection[] sections = chunk.getSections();
+  static int getBlockState(ChunkAccess chunk, int x, int y, int z) {
+    @Nullable LevelChunkSection[] sections = chunk.getSections();
 
     int sectionIndex = chunk.getSectionIndex(y);
     if (sectionIndex >= 0 && sectionIndex < sections.length) {
@@ -71,7 +77,7 @@ public class NmsManager extends AbstractNmsManager {
     super(Block.BLOCK_STATE_REGISTRY.size());
 
     for (Map.Entry<ResourceKey<Block>, Block> entry : Registry.BLOCK.entrySet()) {
-      NamespacedKey namespacedKey = NamespacedKey.fromString(entry.getKey().location().toString());
+      NamespacedKey namespacedKey = NamespacedKey.parse(entry.getKey().location().toString());
       Block block = entry.getValue();
 
       ImmutableList<BlockState> possibleBlockStates = block.getStateDefinition().getPossibleStates();
@@ -80,6 +86,7 @@ public class NmsManager extends AbstractNmsManager {
       for (BlockState blockState : possibleBlockStates) {
         BlockStateProperties properties = BlockStateProperties.builder(Block.getId(blockState))
             .withIsAir(blockState.isAir())
+            .withIsLava(block == Blocks.LAVA)
             .withIsOccluding(blockState.isSolidRender(EmptyBlockGetter.INSTANCE, BlockPos.ZERO))
             .withIsBlockEntity(blockState.hasBlockEntity())
             .withIsDefaultState(Objects.equals(block.defaultBlockState(), blockState))
@@ -92,7 +99,7 @@ public class NmsManager extends AbstractNmsManager {
     }
 
     for (Map.Entry<ResourceLocation, Tag<Block>> entry : BlockTags.getAllTags().getAllTags().entrySet()) {
-      NamespacedKey namespacedKey = NamespacedKey.fromString(entry.getKey().toString());
+      NamespacedKey namespacedKey = NamespacedKey.parse(entry.getKey().toString());
 
       Set<BlockProperties> blocks = new HashSet<>();
       for (Block block : entry.getValue().getValues()) {
@@ -112,25 +119,25 @@ public class NmsManager extends AbstractNmsManager {
   }
 
   @Override
-  public ReadOnlyChunk getReadOnlyChunk(World world, int chunkX, int chunkZ) {
-    ServerChunkCache serverChunkCache = level(world).getChunkProvider();
-    LevelChunk chunk = serverChunkCache.getChunk(chunkX, chunkZ, true);
-    return new ReadOnlyChunkWrapper(chunk);
+  public CompletableFuture<@Nullable ChunkAccessor> getChunkFuture(World world, int chunkX, int chunkZ) {
+    return level(world).getChunkProvider()
+        .getChunkFuture(chunkX, chunkZ, ChunkStatus.FULL, true)
+        .thenApply(result -> {
+          var chunk = result.left().orElse(null);
+          return chunk != null ? new DefaultChunkAccessor(chunk) : null;
+        });
   }
 
   @Override
-  public int getBlockState(World world, int x, int y, int z) {
+  public @Nullable ChunkAccessor getChunkNow(World world, int chunkX, int chunkZ) {
     ServerChunkCache serverChunkCache = level(world).getChunkProvider();
-    if (!serverChunkCache.isChunkLoaded(x >> 4, z >> 4)) {
-      return BLOCK_ID_AIR;
+
+    LevelChunk chunk = serverChunkCache.getChunkNow(chunkX, chunkZ);
+    if (chunk == null && serverChunkCache.isChunkLoaded(chunkX, chunkZ)) {
+      chunk = serverChunkCache.getChunk(chunkX, chunkZ, false);
     }
 
-    LevelChunk chunk = serverChunkCache.getChunk(x >> 4, z >> 4, true);
-    if (chunk == null) {
-      return BLOCK_ID_AIR;
-    }
-
-    return getBlockState(chunk, x, y, z);
+    return chunk != null ? new DefaultChunkAccessor(chunk) : null;
   }
 
   @Override
@@ -169,7 +176,10 @@ public class NmsManager extends AbstractNmsManager {
       if (blockState.hasBlockEntity()) {
         BlockEntity blockEntity = level.getBlockEntity(position);
         if (blockEntity != null) {
-          blockEntityPackets.add(blockEntity.getUpdatePacket());
+          Packet<ClientGamePacketListener> packet = blockEntity.getUpdatePacket();
+          if (packet != null) {
+            blockEntityPackets.add(packet);
+          }
         }
       }
     }

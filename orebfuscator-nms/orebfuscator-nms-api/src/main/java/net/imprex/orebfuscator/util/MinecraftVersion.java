@@ -1,18 +1,16 @@
 package net.imprex.orebfuscator.util;
 
+import dev.imprex.orebfuscator.logging.OfcLogger;
+import dev.imprex.orebfuscator.util.Version;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
-
 import org.bukkit.Bukkit;
-
-import dev.imprex.orebfuscator.logging.OfcLogger;
-import dev.imprex.orebfuscator.util.Version;
 
 public final class MinecraftVersion {
 
-  private static final class NmsMapping {
+  private record NmsMapping(Version version, String nmsVersion) {
 
     private static final List<NmsMapping> MAPPINGS = new ArrayList<>();
 
@@ -28,6 +26,8 @@ public final class MinecraftVersion {
     }
 
     public static String get(Version version) {
+      version = new Version(version.major(), version.minor(), version.patch(), null);
+
       for (NmsMapping mapping : MAPPINGS) {
         if (version.isAtOrAbove(mapping.version)) {
           if (mapping.version.minor() != version.minor()) {
@@ -42,19 +42,15 @@ public final class MinecraftVersion {
       throw new RuntimeException("Can't get nms package version for minecraft version: " + version);
     }
 
-    private final Version version;
-    private final String nmsVersion;
-
-    public NmsMapping(String version, String nmsVersion) {
-      this.version = Version.parse(version);
-      this.nmsVersion = nmsVersion;
+    private NmsMapping(String version, String nmsVersion) {
+      this(Version.parse(version), nmsVersion);
     }
   }
 
   private static final Pattern PACKAGE_PATTERN = Pattern.compile("org\\.bukkit\\.craftbukkit\\.(v\\d+_\\d+_R\\d+)");
   private static final Version CURRENT_VERSION = Version.parse(Bukkit.getBukkitVersion());
 
-  private static String NMS_VERSION;
+  private static final String NMS_VERSION;
 
   static {
     String craftBukkitPackage = Bukkit.getServer().getClass().getPackage().getName();
