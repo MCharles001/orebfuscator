@@ -1,12 +1,14 @@
 package net.imprex.orebfuscator.util;
 
-import dev.imprex.orebfuscator.logging.OfcLogger;
-import dev.imprex.orebfuscator.util.Version;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+
 import org.bukkit.Bukkit;
+
+import dev.imprex.orebfuscator.logging.OfcLogger;
+import dev.imprex.orebfuscator.util.Version;
 
 public final class MinecraftVersion {
 
@@ -15,6 +17,7 @@ public final class MinecraftVersion {
     private static final List<NmsMapping> MAPPINGS = new ArrayList<>();
 
     static {
+      MAPPINGS.add(new NmsMapping("26.1.1", "v26_1_1"));
       MAPPINGS.add(new NmsMapping("26.1.0", "v26_1"));
       MAPPINGS.add(new NmsMapping("1.21.11", "v1_21_R7"));
       MAPPINGS.add(new NmsMapping("1.21.9", "v1_21_R6"));
